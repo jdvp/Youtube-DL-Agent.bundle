@@ -8,6 +8,63 @@ import json
 def Start():
     Log("Starting up ...")
 
+def getMetadataExpectedPath(media):
+    Log("Youtube-DL Agent: Running getMetadataExpectedPath")
+    file = ""
+    for s in media.seasons:
+        for e in media.seasons[s].episodes:
+            file = media.seasons[s].episodes[e].items[0].parts[0].file
+
+            # If there is no file we can't get any metadata
+            if file == "":
+                continue
+
+            # Split the filepath and file extension
+            filepath, file_extension = os.path.splitext(file)
+            filepath = filepath.strip()
+
+            return filepath + ".info.json"
+    return ""
+
+def loadTvShowMetadata(metadata, metadataFile):
+    Log("Youtube-DL Agent: Running loadTvShowMetadata")
+
+    Log("Opening metadata file: {}".format(metadataFile))
+    if metadataFile != "" and os.path.isfile(metadataFile):
+        try:
+            with open(metadataFile, encoding="utf-8") as json_file:
+                data = json.load(json_file)
+
+                metadata.title = data['uploader']
+                metadata.studio = data['uploader']
+                if 'playlist_title' in data:
+                    metadata.summary = data['playlist_title']
+
+                Log("Finished reading metadata file: {}".format(metadataFile))
+        except IOError:
+            Log("Could not access metadata file '{}'".format(metadataFile))
+    else:
+        Log("loadTvShowMetadata: metadata file does not seem to exist")
+
+def loadTvShowArt(metadataFile, mediaType, collection):
+    Log("Youtube-DL Agent: Running loadTvShowArt for {}".format(mediaType))
+
+    filedir = os.path.split(metadataFile)[0]
+
+    # Check if there is a thumbnail for this Show (/Youtuber)
+    for extension in [".jpg", ".jpeg", ".webp", ".png", ".tiff", ".gif", ".jp2"]:
+        maybeFile = os.path.join(filedir, mediaType + extension)
+        if os.path.isfile(maybeFile):
+            # we found an image, attempt to create an Proxy Media object to store it
+            try:
+                Log("loadTvShowArt: found valid {} file : {}".format(mediaType, maybeFile))
+                picture = Core.storage.load(maybeFile)
+                picture_hash = hashlib.md5(picture).hexdigest()
+                collection[picture_hash] = Proxy.Media(picture, sort_order=1)
+                break
+            except Exception as e:
+                Log("loadTvShowArt: Could not access file '{}' due to error {}".format(maybeFile, e))
+
 class YoutubeDLAgent(Agent.TV_Shows):
     name, primary_provider, fallback_agent, contributes_to, languages, accepts_from = (
     'Youtube-DL', True, False, None, [Locale.Language.English, ], None)
@@ -26,36 +83,11 @@ class YoutubeDLAgent(Agent.TV_Shows):
     def update(self, metadata, media, lang):
         Log("".ljust(157, '='))
 
-        file = ""
-
-        # Get the path to an media file
-        for s in media.seasons:
-            for e in media.seasons[s].episodes:
-                file = media.seasons[s].episodes[e].items[0].parts[0].file
-
-                # If there is no file we can't get any metadata
-                if file == "":
-                    continue
-
-                # Split the filepath and file extension
-                filepath, file_extension = os.path.splitext(file)
-                filepath = filepath.strip()
-
-                try:
-                    with open(filepath + ".info.json", encoding="utf-8") as json_file:
-                        data = json.load(json_file)
-
-                        metadata.title = data['uploader']
-                        metadata.studio = data['uploader']
-                        if 'playlist_title' in data:
-                            metadata.summary = data['playlist_title']
-
-                        break
-                except IOError:
-                    file = ""
-                    Log("Could not access file '{}'".format(filepath + ".info.json"))
-                    continue
-            break
+        metadataFile = getMetadataExpectedPath(media)
+        loadTvShowMetadata(metadata, metadataFile)
+        loadTvShowArt(metadataFile, "poster", metadata.posters)
+        loadTvShowArt(metadataFile, "banner", metadata.banners)
+        loadTvShowArt(metadataFile, "background", metadata.art)
 
         @parallelize
         def UpdateEpisodes():
